@@ -1,7 +1,6 @@
 import Foundation
 import OSLog
-
-@_implementationOnly import VKSDK
+import VKID
 
 extension VkAuth {
     func send(event: Event) {
@@ -25,16 +24,10 @@ struct Event {
         self.event = event
     }
 
-    // MARK: - Accessors
-
     static let onLogout = Self(OnLogout())
 
-    static func onAuth(userSession: VKID.UserSession) -> Self {
+    static func onAuth(userSession: UserSession) -> Self {
         .init(OnAuth(userSession: userSession))
-    }
-
-    static func onSilentDataReceive(silentToken: VKID.SilentToken) -> Self {
-        .init(OnSilentDataReceive(silentToken: silentToken))
     }
 }
 
@@ -54,17 +47,8 @@ extension Event {
         let name = "onAuth"
         let body: Any
 
-        init(userSession: VKID.UserSession) {
+        init(userSession: UserSession) {
             self.body = userSession.dictionary
-        }
-    }
-
-    private struct OnSilentDataReceive: RCTEvent {
-        let name = "onSilentDataReceive"
-        let body: Any
-
-        init(silentToken: VKID.SilentToken) {
-            self.body = ["token": ["value": silentToken.token.value], "uuid": silentToken.uuid]
         }
     }
 }

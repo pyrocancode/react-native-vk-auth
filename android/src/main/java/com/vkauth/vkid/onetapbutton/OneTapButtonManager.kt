@@ -1,166 +1,69 @@
 package com.vkauth.vkid.onetapbutton
 
-import android.content.Context
-import android.graphics.Color
+import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
-import com.facebook.react.uimanager.LayoutShadowNode
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
-import com.facebook.react.views.text.ReactTextShadowNode
-import com.vk.auth.ui.fastloginbutton.VkFastLoginButton
+import com.vk.id.onetap.xml.OneTap
+import com.vkauth.vkid.VkAuthServiceHolder
 
-class OneTabButtonManager : SimpleViewManager<VkFastLoginButton>() {
+/**
+ * VK ID One Tap (XML). См. [OneTap.setCallbacks](https://vkcom.github.io/vkid-android-sdk/onetap-xml/com.vk.id.onetap.xml/-one-tap/set-callbacks.html).
+ */
+class OneTabButtonManager : SimpleViewManager<OneTap>() {
+
   override fun getName(): String = COMPONENT_NAME
 
-  override fun createShadowNodeInstance(context: ReactApplicationContext): LayoutShadowNode {
-    return ReactTextShadowNode()
-  }
-
-  override fun createViewInstance(context: ThemedReactContext): VkFastLoginButton {
-    return VkFastLoginButton(context)
+  override fun createViewInstance(context: ThemedReactContext): OneTap {
+    val view = OneTap(context)
+    view.setCallbacks(
+      onAuth = { _, accessToken ->
+        VkAuthServiceHolder.authDelegate?.emitAuthSuccess(accessToken)
+      },
+      onFail = { _, fail ->
+        Log.e(TAG, "OneTap onFail: $fail")
+        VkAuthServiceHolder.authDelegate?.emitAuthFail(fail.toString())
+      },
+    )
+    return view
   }
 
   @ReactProp(name = "backgroundStyle")
-  fun setStyle(view: VkFastLoginButton, style: ReadableMap) {
-    android.util.Log.d(TAG, "setStyle($style)")
-
-    val vkStyle = when (style.getString("style")) {
-      "BLUE" -> VkFastLoginButton.ButtonStyle.BLUE
-      "WHITE" -> VkFastLoginButton.ButtonStyle.WHITE
-      "CUSTOM" -> VkFastLoginButton.ButtonStyle.CUSTOM
-      else -> null
-    } ?: return
-
-    if (vkStyle == VkFastLoginButton.ButtonStyle.CUSTOM) {
-      val vkIconColor = when (style.getString("customVkIconColor")) {
-        "BLUE" -> VkFastLoginButton.VkIconColor.BLUE
-        "WHITE" -> VkFastLoginButton.VkIconColor.WHITE
-        else -> null
-      } ?: return
-
-      view.setCustomStyle(
-        bgColor = Color.parseColor(style.getString("customBackgroundColor")),
-        textColor = Color.parseColor(style.getString("customTextColor")),
-        vkIconColor = vkIconColor
-      )
-    } else {
-      view.setButtonStyle(vkStyle)
-    }
-
+  fun setBackgroundStyle(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") style: ReadableMap) {
+    // Стили One Tap задаются через [OneTap.style]; при необходимости сопоставьте с [com.vk.id.onetap.common.OneTapStyle].
   }
 
   @ReactProp(name = "iconGravity")
-  fun setGravity(view: VkFastLoginButton, gravity: String) {
-    android.util.Log.d(TAG, "setGravity($gravity)")
-
-    val vkGravity = when (gravity) {
-      "START" -> VkFastLoginButton.VkIconGravity.START
-      "TEXT" -> VkFastLoginButton.VkIconGravity.TEXT
-      else -> null
-    } ?: return
-
-    view.setVkIconGravity(vkGravity)
-  }
+  fun setIconGravity(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") gravity: String) {}
 
   @ReactProp(name = "firstLineFieldType")
-  fun setFirstLineField(view: VkFastLoginButton, type: String) {
-    android.util.Log.d(TAG, "setFirstLineField($type)")
-
-    val vkType = when (type) {
-      "ACTION" -> VkFastLoginButton.LineFieldType.ACTION
-      "PHONE" -> VkFastLoginButton.LineFieldType.PHONE
-      "NONE" -> VkFastLoginButton.LineFieldType.NONE
-      else -> null
-    } ?: return
-
-    view.setFirstLineField(vkType)
-  }
+  fun setFirstLineField(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") type: String) {}
 
   @ReactProp(name = "secondLineFieldType")
-  fun setSecondLineField(view: VkFastLoginButton, type: String) {
-    android.util.Log.d(TAG, "setSecondLineField($type)")
-    val vkType = when (type) {
-      "ACTION" -> VkFastLoginButton.LineFieldType.ACTION
-      "PHONE" -> VkFastLoginButton.LineFieldType.PHONE
-      "NONE" -> VkFastLoginButton.LineFieldType.NONE
-      else -> null
-    } ?: return
-
-    view.setSecondLineField(vkType)
-  }
+  fun setSecondLineField(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") type: String) {}
 
   @ReactProp(name = "oneLineTextSize")
-  fun setOneLineTextSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setOneLineTextSize($size)")
-    view.setOneLineTextSize(size)
-  }
+  fun setOneLineTextSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "firstLineTextSize")
-  fun setFirstLineTextSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setFirstLineTextSize($size)")
-    view.setFirstLineTextSize(size)
-  }
+  fun setFirstLineTextSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "secondLineTextSize")
-  fun setSecondLineTextSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setSecondLineTextSize($size)")
-    view.setSecondLineTextSize(size)
-  }
+  fun setSecondLineTextSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "avatarSize")
-  fun setAvatarSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setAvatarSize($size)")
-
-    view.setAvatarSize(size.toInt())
-  }
+  fun setAvatarSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "iconSize")
-  fun setVkIconSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setVkIconSize($size)")
-    view.setVkIconSize(size.toInt())
-  }
+  fun setVkIconSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "progressSize")
-  fun setProgressSize(view: VkFastLoginButton, size: Float) {
-    android.util.Log.d(TAG, "setProgressSize($size)")
-    view.setProgressSize(size.toInt())
-  }
+  fun setProgressSize(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") size: Float) {}
 
   @ReactProp(name = "texts")
-  fun setTexts(view: VkFastLoginButton, texts: ReadableMap) {
-    android.util.Log.d(TAG, "setTexts($texts)")
-
-    view.setTextGetter(
-      object : VkFastLoginButton.TextGetter() {
-        override fun getNoUserText(
-          context: Context,
-          actionTextSize: VkFastLoginButton.ActionTextSize
-        ): String {
-          return texts.getString("noUserText") ?: super.getNoUserText(context, VkFastLoginButton.ActionTextSize.BIG)
-        }
-
-        override fun getActionText(
-          context: Context,
-          firstName: String,
-          lastName: String,
-          actionTextSize: VkFastLoginButton.ActionTextSize
-        ): String {
-          val text = texts.getString("actionText")
-            ?.replace("{firstName}", firstName)
-            ?.replace("{lastName}", lastName)
-          return text ?: super.getActionText(context, firstName, lastName, VkFastLoginButton.ActionTextSize.BIG)
-        }
-
-        override fun getPhoneText(context: Context, phone: String): String {
-          val text = texts.getString("phoneText")
-            ?.replace("{phone}", phone)
-          return text ?: super.getPhoneText(context, phone)
-        }
-      }
-    )
-  }
+  fun setTexts(@Suppress("UNUSED_PARAMETER") view: OneTap, @Suppress("UNUSED_PARAMETER") texts: ReadableMap) {}
 
   private companion object {
     private const val COMPONENT_NAME = "RTCVkOneTapButton"

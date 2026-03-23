@@ -5,119 +5,127 @@ import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
-import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.vk.api.sdk.VKApiCallback
-import com.vk.auth.api.models.AuthResult
-import com.vk.auth.main.VkClientAuthCallback
-import com.vk.auth.main.VkClientAuthLib
-import com.vk.auth.main.VkSilentTokenExchanger
-import com.vk.auth.ui.fastlogin.VkFastLoginBottomSheetFragment
-import com.vk.dto.common.id.UserId
-import com.vk.superapp.api.dto.account.ProfileShortInfo
-import com.vk.superapp.bridges.LogoutReason
-import com.vkauth.vkid.dto.UserSession
-import com.vkauth.vkid.dto.toMap
-import com.vkauth.vkid.jstutils.JsCbSender
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.vk.id.VKID
+import com.vk.id.VKIDAuthFail
+import com.vk.id.auth.AuthCodeData
+import com.vk.id.auth.VKIDAuthCallback
+import com.vk.id.auth.VKIDAuthParams
+import com.vk.id.logout.VKIDLogoutCallback
+import com.vk.id.logout.VKIDLogoutFail
 
-class AuthDelegate(
-  private val context: ReactApplicationContext
-) {
-  private val jsCallbackSender = JsCbSender()
+class AuthDelegate(private val reactContext: ReactApplicationContext) {
+
+  companion object {
+    private const val TAG = "VkAuth"
+  }
 
   init {
-    VkClientAuthLib.addAuthCallback(object : VkClientAuthCallback {
-      override fun onLogout(logoutReason: LogoutReason) {
-        super.onLogout(logoutReason)
-        jsCallbackSender.sendCallback(context, ON_LOGOUT_EVENT, null)
-      }
-    })
+    VKID.logsEnabled = true
   }
 
   fun startAuth() {
-    val activity = context.currentActivity as? FragmentActivity ?: return
-
-    if (isShown()) {
+    val activity = reactContext.currentActivity as? FragmentActivity
+    if (activity == null) {
+      Log.e(TAG, "startAuth: no FragmentActivity")
+      emitAuthFail("No activity")
       return
     }
+    VKID.instance.authorize(
+      activity,
+      object : VKIDAuthCallback {
+        override fun onAuth(accessToken: com.vk.id.AccessToken) {
+          Log.d(
+            TAG,
+            "VKID onAuth: userID=${accessToken.userID} expire=${accessToken.expireTime}",
+          )
+          emitAuthSuccess(accessToken)
+        }
 
-    VkFastLoginBottomSheetFragment.Builder()
-      .setDismissOnComplete(false)
-      .show(activity.supportFragmentManager, FAST_LOGIN_TAG)
+        override fun onAuthCode(data: AuthCodeData, isCompletion: Boolean) {
+          Log.d(TAG, "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}")
+        }
+
+        override fun onFail(fail: VKIDAuthFail) {
+          Log.e(TAG, "VKID onFail: $fail")
+          emitAuthFail(fail.toString())
+        }
+      },
+      VKIDAuthParams.Builder().build(),
+    )
   }
 
   fun closeAuth() {
-    val activity = context.currentActivity as? FragmentActivity ?: return
-    (activity.supportFragmentManager.findFragmentByTag(FAST_LOGIN_TAG) as? BottomSheetDialogFragment)
-      ?.dismissAllowingStateLoss()
-      ?: run {
-        (activity.supportFragmentManager
-          .fragments
-          .find { it is VkFastLoginBottomSheetFragment } as? BottomSheetDialogFragment)
-          ?.dismissAllowingStateLoss()
-      }
-  }
-
-  fun accessTokenChangedSuccess(token: String, userId: Int) {
-    val userSessionJson = UserSession.Authorized.toMap()
-    jsCallbackSender.sendCallback(context, ON_AUTH_EVENT, userSessionJson)
-
-    closeAuth()
-  }
-
-  fun accessTokenChangedFailed() {
-    closeAuth()
+    // VK ID SDK не требует явного закрытия веб-view из нативного модуля.
   }
 
   fun logout() {
-    VkClientAuthLib.logout()
+    val activity = reactContext.currentActivity as? FragmentActivity
+    if (activity == null) {
+      Log.e(TAG, "logout: no FragmentActivity")
+      return
+    }
+    VKID.instance.logout(
+      object : VKIDLogoutCallback {
+        override fun onSuccess() {
+          Log.d(TAG, "VKID logout success")
+          sendEvent("onLogout", null)
+        }
+
+        override fun onFail(fail: VKIDLogoutFail) {
+          Log.e(TAG, "VKID logout fail: $fail")
+        }
+      },
+      activity,
+    )
+  }
+
+  fun accessTokenChangedSuccess(token: String, userId: Int) {
+    // Старый поток silent token; оставлено для совместимости с JS до миграции приложения.
+    Log.d(TAG, "accessTokenChangedSuccess (legacy): userId=$userId")
+  }
+
+  fun accessTokenChangedFailed() {
+    Log.d(TAG, "accessTokenChangedFailed (legacy)")
   }
 
   fun getUserSessions(promise: Promise) {
-    val creds = VkClientAuthLib.getAccessToken() ?: run {
-      promise.resolve(Arguments.createArray())
-      return
+    val token = VKID.instance.accessToken
+    val arr = com.facebook.react.bridge.Arguments.createArray()
+    if (token != null) {
+      val m = com.facebook.react.bridge.Arguments.createMap()
+      m.putString("type", "authorized")
+      arr.pushMap(m)
     }
-
-    val array = Arguments.createArray().apply {
-      pushMap(UserSession.Authorized.toMap())
-    }
-    promise.resolve(array)
-  }
-
-  private fun isShown(): Boolean {
-    val activity = context.currentActivity as? FragmentActivity ?: return false
-
-    val byTag = (activity.supportFragmentManager.findFragmentByTag(FAST_LOGIN_TAG) as? BottomSheetDialogFragment) != null
-
-    if (byTag) {
-      return true
-    }
-
-    return activity.supportFragmentManager
-      .fragments
-      .any { it is VkFastLoginBottomSheetFragment }
+    promise.resolve(arr)
   }
 
   fun getUserProfile(promise: Promise) {
-    val profile = VkClientAuthLib.getProfileInfo()?.toMap() ?: run {
-      VkClientAuthLib.updateUserInfo(
-        object : VKApiCallback<ProfileShortInfo> {
-          override fun fail(error: Exception) {
-            promise.reject(error)
-          }
-          override fun success(result: ProfileShortInfo) {
-            promise.resolve(result.toMap())
-          }
-        }
-      )
+    val token = VKID.instance.accessToken
+    if (token == null) {
+      promise.reject("E_VK_NOT_AUTHORIZED", "No VK ID access token")
       return
     }
-    promise.resolve(profile)
+    promise.resolve(VkAuthPayload.profileForJs(token.userID, token.userData))
   }
 
-  private companion object {
-    private const val FAST_LOGIN_TAG = "vk_fast_login"
-    private const val ON_AUTH_EVENT = "onAuth"
-    private const val ON_LOGOUT_EVENT = "onLogout"
+  fun emitAuthSuccess(accessToken: com.vk.id.AccessToken) {
+    val map = VkAuthPayload.fromAccessToken(accessToken)
+    map.putMap("profile", VkAuthPayload.profileForJs(accessToken.userID, accessToken.userData))
+    sendEvent("onAuth", map)
+  }
+
+  fun emitAuthFail(message: String) {
+    val map = Arguments.createMap()
+    map.putString("type", "error")
+    map.putString("error", message)
+    sendEvent("onAuth", map)
+  }
+
+  private fun sendEvent(eventName: String, params: WritableMap?) {
+    reactContext
+      .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      .emit(eventName, params)
   }
 }

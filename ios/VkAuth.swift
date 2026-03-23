@@ -1,22 +1,40 @@
 import UIKit
 import OSLog
+import React
+import VKID
+import VKIDCore
 
-@_implementationOnly import VKSDK
+// MARK: - Общие хелперы (VK ID SDK 2.x, OAuth 2.1)
 
+fileprivate func vkAuthTopViewController() -> UIViewController? {
+    let keyWindow: UIWindow?
+    if #available(iOS 13.0, *) {
+        keyWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }
+    } else {
+        keyWindow = UIApplication.shared.keyWindow
+    }
+    guard var top = keyWindow?.rootViewController else { return nil }
+    while let presented = top.presentedViewController {
+        top = presented
+    }
+    return top
+}
+
+/// Публичный клиент + PKCE внутри SDK. Для обмена кода на бэкенде позже можно сменить на `confidentialClientFlow`.
+fileprivate func vkAuthMakeConfiguration() -> AuthConfiguration {
+    AuthConfiguration(
+        flow: .publicClientFlow(),
+        scope: Scope([])
+    )
+}
+
+/// React Native мост для VK ID SDK. См. https://id.vk.com/about/business/go/docs/ru/vkid/latest/vk-id/connection/migration/ios/migration-ios
 @objc(VkAuth)
 final class VkAuth: RCTEventEmitter {
-    private static var _sharedSDK: VKSDK.VK.Type2<App, VKID>? // DO NOT USE THIS DIRECTLY
-    fileprivate static var _sharedSuperappKit: VkAuth?
-
-    fileprivate static var sharedSDK: VKSDK.VK.Type2<App, VKID> {
-        guard let _shared = Self._sharedSDK else {
-            fatalError("VKSDK is not initialized. Call initialize(_:vkid:) method before using VkAuth.")
-        }
-
-        return _shared
-    }
-
-    private var activeAuthCompletion: ((Result<VKSDK.VKID.AccessToken, Error>) -> Void)?
+    fileprivate static weak var _sharedEmitter: VkAuth?
 
     @objc(initialize:vkid:)
     func initialize(_ app: NSDictionary, vkid: NSDictionary) {
@@ -30,50 +48,50 @@ final class VkAuth: RCTEventEmitter {
         }
 
         do {
-            Self._sharedSDK = try VK {
-                App(credentials: .init(clientId: clientId, clientSecret: clientSecret))
-                VKID()
-            }
-            Self._sharedSuperappKit = self
+            try VKID.shared.set(
+                config: Configuration(
+                    appCredentials: AppCredentials(
+                        clientId: clientId,
+                        clientSecret: clientSecret
+                    )
+                )
+            )
+            VkAuth._sharedEmitter = self
+            VKID.shared.add(observer: self)
         } catch {
-            os_log("VKSDK initialization failed", type: .error, error.localizedDescription)
+            os_log("VKID initialization failed: %{public}@", type: .error, error.localizedDescription)
         }
     }
 
     @objc(openURL:)
-    func openURL(_ url: String) {
-        guard let url = URL(string: url) else {
-            return
-        }
-
-        try? Self.sharedSDK.open(url: url)
+    func openURL(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        _ = VKID.shared.open(url: url)
     }
 
-    // MARK: - Auth
-
     @objc func startAuth() {
-        let flow = VKID.AuthFlow.exchanging(tokenExchanger: .custom(weak: self))
-        let authController = VKID.AuthController(flow: flow, delegate: self)
-
-        let viewController = try! Self.sharedSDK.vkid.ui(for: authController).uiViewController()
-        UIApplication.shared.keyWindow?.rootViewController?.present(viewController, animated: true)
+        guard let presenter = vkAuthTopViewController() else {
+            os_log("No presenter for VKID authorize", type: .error)
+            return
+        }
+        VKID.shared.authorize(
+            with: vkAuthMakeConfiguration(),
+            using: .uiViewController(presenter)
+        ) { _ in }
     }
 
     @objc func closeAuth() {
-        UIApplication.shared.keyWindow?.rootViewController?.dismiss(animated: true)
-        os_log("Authorization closed", type: .info)
+        vkAuthTopViewController()?.dismiss(animated: true)
+        os_log("Authorization UI dismissed", type: .info)
     }
 
     @objc func logout() {
-        guard let userSession = Self.sharedSDK.vkid.userSessions.first else {
-            return
+        guard let session = VKID.shared.authorizedSessions.first else { return }
+        session.logout { [weak self] result in
+            if case .success = result {
+                self?.send(event: .onLogout)
+            }
         }
-
-        userSession.authorized?.logout { [weak self] _ in
-            self?.send(event: .onLogout)
-        }
-
-        os_log("Logout user session", type: .info, "\(userSession)")
     }
 
     @objc(getUserSessions:rejecter:)
@@ -81,7 +99,7 @@ final class VkAuth: RCTEventEmitter {
         resolver resolve: RCTPromiseResolveBlock,
         rejecter reject: RCTPromiseRejectBlock
     ) {
-        resolve(Self.sharedSDK.vkid.userSessions.map(\.dictionary))
+        resolve(VKID.shared.authorizedSessions.map(\.dictionary))
     }
 
     @objc(getUserProfile:rejecter:)
@@ -89,92 +107,90 @@ final class VkAuth: RCTEventEmitter {
         resolver resolve: @escaping RCTPromiseResolveBlock,
         rejecter reject: @escaping RCTPromiseRejectBlock
     ) {
-        guard let authorized = Self.sharedSDK.vkid.userSessions.first?.authorized else {
-            reject(nil, nil, nil)
+        guard let session = VKID.shared.authorizedSessions.first else {
+            reject("no_session", "No authorized VK ID session", nil)
             return
         }
-
-        authorized.requestProfile { result in
-            do {
-                let profile = try result.get()
-                resolve(profile.dictionary)
-            } catch {
-                reject(nil, nil, nil)
+        session.fetchUser { result in
+            switch result {
+            case .success:
+                if let user = session.user {
+                    resolve(user.dictionary)
+                } else {
+                    resolve(["userID": ["value": String(session.userId.value)]])
+                }
+            case .failure(let error):
+                reject("profile_failed", error.localizedDescription, error)
             }
         }
-    }
-}
-
-extension VkAuth: TokenExchanging {
-    func exchange(silentToken: VKSDK.VKID.SilentToken, completion: @escaping (Result<VKSDK.VKID.AccessToken, Error>) -> Void) {
-        self.activeAuthCompletion = completion
-        self.send(event: .onSilentDataReceive(silentToken: silentToken))
     }
 
     @objc(accessTokenChangedSuccess:userId:)
     func accessTokenChangedSuccess(_ token: String, userId: NSNumber) {
-        let accessToken = VKID.AccessToken(.init(token), userID: .init(userId.uint64Value))
-        self.activeAuthCompletion?(.success(accessToken))
-        self.activeAuthCompletion = nil
-        
-        os_log("Token exchange succeeded", type: .info)
+        os_log("accessTokenChangedSuccess ignored on VK ID iOS (no silent exchange)", type: .info)
     }
 
     @objc(accessTokenChangedFailed:)
     func accessTokenChangedFailed(_ error: NSDictionary) {
-        let reactError = NSError(domain: "React Native", code: -9999, userInfo: error as! [String : Any])
-        self.activeAuthCompletion?(.failure(reactError))
-        self.activeAuthCompletion = nil
+        os_log("accessTokenChangedFailed ignored on VK ID iOS", type: .info)
+    }
 
-        os_log("Token exchange failed", type: .error, reactError.localizedDescription)
+    @objc(supportedEvents)
+    override func supportedEvents() -> [String]! {
+        ["onLogout", "onAuth"]
     }
 }
 
-extension VkAuth: VKIDFlowDelegate {
-    func vkid(_ vkid: VKSDK.VKID.Module, didCompleteAuthWith result: Result<VKSDK.VKID.UserSession, Error>) {
+extension VkAuth: VKIDObserver {
+    func vkid(_ vkid: VKID, didCompleteAuthWith result: AuthResult, in oAuth: OAuthProvider) {
         do {
-            self.send(event: .onAuth(userSession: try result.get()))
+            let session = try result.get()
+            send(event: .onAuth(userSession: session))
+        } catch AuthError.cancelled {
+            os_log("VKID auth cancelled", type: .info)
         } catch {
-            os_log("Authorization failed", type: .error, error.localizedDescription)
+            os_log("VKID auth failed: %{public}@", type: .error, error.localizedDescription)
         }
     }
+
+    func vkid(_ vkid: VKID, didLogoutFrom session: UserSession, with result: LogoutResult) {
+        if case .success = result {
+            send(event: .onLogout)
+        }
+    }
+
+    func vkid(_ vkid: VKID, didStartAuthUsing oAuth: OAuthProvider) {}
+
+    func vkid(_ vkid: VKID, didUpdateUserIn session: UserSession, with result: UserFetchingResult) {}
+
+    func vkid(_ vkid: VKID, didRefreshAccessTokenIn session: UserSession, with result: TokenRefreshingResult) {}
 }
 
 @objc(RTCVkOneTapButton)
 final class OneTapButtonManager: RCTViewManager {
     override func view() -> UIView! {
-        guard let sharedSuperappKit = VkAuth._sharedSuperappKit else {
-            fatalError("VkAuth is not initialized. Call initialize(_:vkid:) method before using VkAuth.")
+        guard VkAuth._sharedEmitter != nil else {
+            os_log("VkAuth not initialized before OneTap", type: .fault)
             return UIView()
         }
-        var authPresenter: VKSDK.UIKitPresenter = .newUIWindow
-        if let root = UIApplication.shared.keyWindow?.rootViewController {
-            authPresenter = .uiViewController(root)
+        guard let root = vkAuthTopViewController() else {
+            return UIView()
         }
 
-        let flow = VKID.AuthFlow.exchanging(tokenExchanger: .custom(weak: sharedSuperappKit))
-        let authController = VKID.AuthController(flow: flow, delegate: sharedSuperappKit)
-
-        let button = VKID.OneTapButton(
-            mode: .default,
-            controllerConfiguration: .authController(
-                authController,
-                presenter: authPresenter
-            )
+        let button = OneTapButton(
+            layout: .regular(
+                height: .medium(.h44),
+                cornerRadius: 8
+            ),
+            presenter: .uiViewController(root),
+            authConfiguration: vkAuthMakeConfiguration(),
+            onCompleteAuth: nil
         )
 
-        guard let buttonView = try? VkAuth.sharedSDK.vkid.ui(for: button).uiView() else {
-            fatalError("OneTapButton configuration problem")
+        guard let view = try? VKID.shared.ui(for: button).uiView() else {
+            os_log("OneTapButton uiView failed", type: .error)
             return UIView()
         }
-
-        return buttonView
-    }
-}
-
-extension VkAuth {
-    @objc(supportedEvents)
-    override func supportedEvents() -> [String] {
-        ["onLogout", "onAuth", "onSilentDataReceive"]
+        return view
     }
 }

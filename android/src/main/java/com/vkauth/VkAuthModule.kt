@@ -1,25 +1,26 @@
 package com.vkauth
 
-import com.facebook.react.bridge.*
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableMap
 import com.vkauth.vkid.AuthDelegate
 import com.vkauth.vkid.InitDelegate
 import com.vkauth.vkid.jsinput.App
-import com.vkauth.vkid.jsinput.VKID
+import com.vkauth.vkid.jsinput.VKID as VkIdInput
 
 class VkAuthModule(
   reactContext: ReactApplicationContext,
   private val initDelegate: InitDelegate,
-  private val authDelegate: AuthDelegate
-) :
-  ReactContextBaseJavaModule(reactContext) {
+  private val authDelegate: AuthDelegate,
+) : ReactContextBaseJavaModule(reactContext) {
 
-  override fun getName(): String {
-    return "VkAuth"
-  }
+  override fun getName(): String = "VkAuth"
 
   @ReactMethod
   fun initialize(app: ReadableMap, vkid: ReadableMap) {
-    initDelegate.initialize(App.fromMap(app), VKID.fromMap(vkid))
+    initDelegate.initialize(App.fromMap(app), VkIdInput.fromMap(vkid))
   }
 
   @ReactMethod
@@ -32,17 +33,18 @@ class VkAuthModule(
     authDelegate.closeAuth()
   }
 
-  // to ignore react warning
   @ReactMethod
-  fun addListener(eventName: String) {
-  }
+  fun addListener(@Suppress("UNUSED_PARAMETER") eventName: String) {}
 
   @ReactMethod
-  fun removeAllListeners() {
-  }
+  fun removeAllListeners() {}
 
   @ReactMethod
-  fun removeListeners(type: Int?) {
+  fun removeListeners(@Suppress("UNUSED_PARAMETER") type: Int?) {}
+
+  @ReactMethod
+  fun openURL(@Suppress("UNUSED_PARAMETER") url: String) {
+    // Редирект обрабатывает VK ID SDK / система; при необходимости дополните.
   }
 
   @ReactMethod
@@ -51,7 +53,7 @@ class VkAuthModule(
   }
 
   @ReactMethod
-  fun accessTokenChangedFailed(error: ReadableMap) {
+  fun accessTokenChangedFailed(@Suppress("UNUSED_PARAMETER") error: ReadableMap) {
     authDelegate.accessTokenChangedFailed()
   }
 

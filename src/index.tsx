@@ -20,12 +20,12 @@ interface VkAuthModule extends NativeModule {
   startAuth: () => void;
   closeAuth: () => void;
   logout: () => void;
-  getUserSessions: () => void;
-  initialize: (app: VK.App, vkid: VKID) => void;
+  getUserSessions: () => Promise<Array<{ type: string }>>;
+  initialize: (app: VK.App, vkid: VKIDInitPayload) => void;
   openURL: (url: string) => void;
 
-  accessTokenChangedSuccess: (token: string, userId: bigint) => void;
-  accessTokenChangedFailed: (error: Error) => void;
+  accessTokenChangedSuccess: (token: string, userId: number) => void;
+  accessTokenChangedFailed: (error: Record<string, unknown>) => void;
 }
 
 const VkAuth: VkAuthModule = NativeModules.VkAuth
@@ -39,9 +39,22 @@ const VkAuth: VkAuthModule = NativeModules.VkAuth
       }
     );
 
+/** Плоский объект для нативного моста (см. jsinput/VKID.kt). */
+export type VKIDInitPayload = {
+  appName: string;
+  appVersion: string;
+  appIcon: ImageResolvedAssetSource;
+  appLinks: VKID.Links;
+};
+
 export class VK {
   static initialize(app: VK.App, vkid: VKID) {
-    VkAuth.initialize(app, vkid);
+    VkAuth.initialize(app, {
+      appName: vkid.appName,
+      appVersion: vkid.appVersion,
+      appIcon: vkid.appIcon,
+      appLinks: vkid.appLinks,
+    });
   }
 
   static openURL(url: string) {
@@ -67,43 +80,81 @@ export namespace VK {
   }
 }
 
+function parseOnAuthPayload(
+  raw: Record<string, unknown>
+): { kind: 'error'; message: string } | { kind: 'ok'; payload: VKID.AuthSuccessPayload } {
+  if (raw.type === 'error') {
+    return {
+      kind: 'error',
+      message: String(raw.error ?? 'VK ID authorization failed'),
+    };
+  }
+
+  if (raw.type === 'authorized') {
+    const vkid = raw.vkid as Record<string, unknown> | undefined;
+    if (vkid && typeof vkid.accessToken === 'string') {
+      const uid =
+        vkid.userID != null && String(vkid.userID) !== ''
+          ? String(vkid.userID)
+          : profileUserIdFromProfile(raw.profile);
+      if (!uid) {
+        return { kind: 'error', message: 'VK user id missing in auth payload' };
+      }
+      return {
+        kind: 'ok',
+        payload: {
+          accessToken: vkid.accessToken,
+          userId: uid,
+          profile: raw.profile as VKID.UserProfile | undefined,
+          vkidNative: vkid,
+        },
+      };
+    }
+
+    if (typeof raw.accessToken === 'string' && typeof raw.userId === 'string') {
+      if (!raw.userId) {
+        return { kind: 'error', message: 'VK user id missing in auth payload' };
+      }
+      return {
+        kind: 'ok',
+        payload: {
+          accessToken: raw.accessToken,
+          userId: raw.userId,
+          profile: raw.profile as VKID.UserProfile | undefined,
+        },
+      };
+    }
+  }
+
+  return { kind: 'error', message: 'Unexpected VK auth payload' };
+}
+
+function profileUserIdFromProfile(profile: unknown): string {
+  if (!profile || typeof profile !== 'object') {
+    return '';
+  }
+  const u = (profile as { userID?: { value?: string } }).userID;
+  return u?.value != null ? String(u.value) : '';
+}
+
 export class VKID {
   readonly appName: string;
   readonly appVersion: string;
   readonly appIcon: ImageResolvedAssetSource;
   readonly appLinks: VKID.Links;
-  private readonly silentTokenExchanger: VKID.SilentTokenExchanger;
   private readonly eventEmitter: NativeEventEmitter;
 
   constructor(
     appName: string,
     appVersion: string,
     appIcon: ImageResolvedAssetSource,
-    appLinks: VKID.Links,
-    silentTokenExchanger: VKID.SilentTokenExchanger
+    appLinks: VKID.Links
   ) {
     this.appName = appName;
     this.appVersion = appVersion;
     this.appIcon = appIcon;
     this.appLinks = appLinks;
-    this.silentTokenExchanger = silentTokenExchanger;
     this.eventEmitter = new NativeEventEmitter(VkAuth);
-
-    this.initSilentDataReceive();
-  }
-
-  private initSilentDataReceive() {
-    this.eventEmitter.removeAllListeners('onSilentDataReceive');
-    this.eventEmitter.addListener(
-      'onSilentDataReceive',
-      async (silentToken: VKID.SilentToken) => {
-        let exchangeResult: VKID.TokenExchangeResult =
-          await this.silentTokenExchanger.exchange(silentToken).catch(() => {
-            return { ok: false, error: Error('Exchange failed') };
-          });
-        VKID.accessTokenChanged(exchangeResult);
-      }
-    );
   }
 
   startAuth() {
@@ -123,12 +174,8 @@ export class VKID {
   }
 
   userSessions(): Promise<Array<VKID.Session.UserSession>> {
-    // @ts-ignore
-    let promise: Promise<Array<UserSessionInternal.UserSession>> =
-      VkAuth.getUserSessions();
-    return promise.then((sessions) => {
-      return sessions.map((session) => {
-        console.log(session);
+    return VkAuth.getUserSessions().then(sessions => {
+      return sessions.map(session => {
         return session.type === UserSessionInternal.Type.AUTHORIZED
           ? new VKID.Session.Authorized()
           : new VKID.Session.Authenticated();
@@ -136,37 +183,25 @@ export class VKID {
     });
   }
 
-  setOnAuthChanged(onAuthChanged: VKID.AuthChangedCallback) {
+  setOnAuthChanged(callbacks: VKID.AuthChangedCallback) {
     this.eventEmitter.removeAllListeners('onLogout');
     this.eventEmitter.removeAllListeners('onAuth');
 
     this.eventEmitter.addListener('onLogout', () => {
-      onAuthChanged.onLogout();
+      callbacks.onLogout();
     });
+
     this.eventEmitter.addListener(
       'onAuth',
-      (session: UserSessionInternal.UserSession) => {
-        console.log(session);
-        let externalSession =
-          session.type === UserSessionInternal.Type.AUTHORIZED
-            ? new VKID.Session.Authorized()
-            : new VKID.Session.Authenticated();
-        onAuthChanged.onAuth(externalSession);
+      (raw: Record<string, unknown>) => {
+        const parsed = parseOnAuthPayload(raw);
+        if (parsed.kind === 'error') {
+          callbacks.onAuthFailed?.(parsed.message);
+          return;
+        }
+        callbacks.onAuthorized(parsed.payload);
       }
     );
-  }
-
-  private static accessTokenChanged(
-    result: VKID.TokenExchangeResult<VKID.AccessToken, Error>
-  ) {
-    if (result.ok) {
-      VkAuth.accessTokenChangedSuccess(
-        result.accessToken.token.value,
-        result.accessToken.userID.value
-      );
-    } else {
-      VkAuth.accessTokenChangedFailed(result.error);
-    }
   }
 }
 
@@ -187,24 +222,6 @@ export namespace VKID {
     }
   }
 
-  export interface SilentToken {
-    token: Token;
-    uuid: string;
-    firstName: string;
-    lastName: string;
-  }
-
-  export interface SilentTokenExchanger {
-    exchange(
-      silentData: VKID.SilentToken
-    ): Promise<VKID.TokenExchangeResult<VKID.AccessToken, Error>>;
-  }
-
-  export interface AccessToken {
-    token: Token;
-    userID: UserID;
-  }
-
   export interface Links {
     serviceUserAgreement: string;
     servicePrivacyPolicy: string;
@@ -221,10 +238,19 @@ export namespace VKID {
     userHash: string | null;
   }
 
-  export interface AuthChangedCallback {
-    onAuth(userSession: VKID.Session.UserSession): void;
+  /** Успешная авторизация VK ID (OAuth 2.1): access token и id пользователя VK. */
+  export interface AuthSuccessPayload {
+    accessToken: string;
+    userId: string;
+    profile?: UserProfile;
+    /** Android: полный ответ VK ID SDK (отладка). */
+    vkidNative?: Record<string, unknown>;
+  }
 
+  export interface AuthChangedCallback {
+    onAuthorized(payload: AuthSuccessPayload): void;
     onLogout(): void;
+    onAuthFailed?(message: string): void;
   }
 
   export namespace Session {
@@ -250,10 +276,6 @@ export namespace VKID {
       }
     }
   }
-
-  export type TokenExchangeResult<T = VKID.AccessToken, E = Error> =
-    | { ok: true; accessToken: T }
-    | { ok: false; error: E };
 }
 
 namespace UserSessionInternal {

@@ -1,5 +1,4 @@
 buildscript {
-  // Buildscript is evaluated before everything else so we can't use getExtOrDefault
   def kotlin_version = rootProject.ext.has('kotlinVersion') ? rootProject.ext.get('kotlinVersion') : project.properties['VkAuth_kotlinVersion']
 
   repositories {
@@ -9,7 +8,6 @@ buildscript {
 
   dependencies {
     classpath 'com.android.tools.build:gradle:3.5.3'
-    // noinspection DifferentKotlinGradleVersion
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
   }
 }
@@ -33,6 +31,7 @@ def getExtOrIntegerDefault(name) {
   return rootProject.ext.has(name) ? rootProject.ext.get(name) : (project.properties['VkAuth_' + name]).toInteger()
 }
 
+def vkidVersion = "2.6.2"
 
 android {
   compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
@@ -62,9 +61,9 @@ android {
 repositories {
   mavenCentral()
   google()
-  maven {
-    url = "https://artifactory-external.vkpartner.ru/artifactory/superappkit-maven-public/"
-  }
+  maven { url = "https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/" }
+  maven { url = "https://artifactory-external.vkpartner.ru/artifactory/maven/" }
+  maven { url = "https://artifactory-external.vkpartner.ru/artifactory/vk-id-captcha/android/" }
 
   def found = false
   def defaultDir = null
@@ -133,17 +132,14 @@ repositories {
 }
 
 def kotlin_version = getExtOrDefault('kotlinVersion')
-def vkSdkVersion = "0.104-24412"
 
 dependencies {
-    //noinspection GradleDynamicVersion
   implementation "com.facebook.react:react-native:+"
-  implementation "com.vk:oauth-vk:${vkSdkVersion}"
-  implementation "com.vk:vksdk-pub:${vkSdkVersion}"
+  implementation "com.vk.id:vkid:${vkidVersion}"
+  implementation "com.vk.id:onetap-xml:${vkidVersion}"
   implementation "androidx.appcompat:appcompat:1.6.1"
-
+  implementation "androidx.fragment:fragment-ktx:1.6.2"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-// From node_modules
 }
 
 if (isNewArchitectureEnabled()) {

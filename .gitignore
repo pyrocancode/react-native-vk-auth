@@ -28,8 +28,9 @@ DerivedData
 *.ipa
 *.xcuserstate
 project.xcworkspace
+ios/build/
 
-# Android/IJ
+# Android/IJ (library module + host)
 #
 .classpath
 .cxx
@@ -39,6 +40,10 @@ project.xcworkspace
 .settings
 local.properties
 android.iml
+android/build/
+android/.gradle/
+android/.cxx/
+*.iml
 
 # Cocoapods
 #
