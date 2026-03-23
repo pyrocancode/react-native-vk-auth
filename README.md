@@ -2,7 +2,7 @@
 
 React Native VK ID Auth.
 
-Форк библиотеки [@devsomersets/react-native-vk-auth](https://www.npmjs.com/package/@devsomersets/react-native-vk-auth) ([исходный репозиторий](https://github.com/somersets/react-native-vk-auth), автор Nikita Likhachev). Разработка ведётся в [pyrocancode/react-native-vk-auth-](https://github.com/pyrocancode/react-native-vk-auth-).
+Форк библиотеки [@devsomersets/react-native-vk-auth](https://www.npmjs.com/package/@devsomersets/react-native-vk-auth) ([исходный репозиторий](https://github.com/somersets/react-native-vk-auth), автор Nikita Likhachev). Разработка ведётся в [pyrocancode/react-native-vk-auth](https://github.com/pyrocancode/react-native-vk-auth).
 
 ## Installation
 
@@ -15,7 +15,7 @@ npm install @pyrocancode/react-native-vk-auth
 Установка напрямую из GitHub:
 
 ```sh
-npm install github:pyrocancode/react-native-vk-auth-
+npm install github:pyrocancode/react-native-vk-auth
 ```
 
 ## Настройка iOS проекта

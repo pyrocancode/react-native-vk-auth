@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.license      = package["license"]
   s.authors      = package["author"]
   s.platforms    = { :ios => "11.4" }
-  s.source       = { :git => "https://github.com/pyrocancode/react-native-vk-auth-.git", :tag => "#{s.version}" }
+  s.source       = { :git => "https://github.com/pyrocancode/react-native-vk-auth.git", :tag => "#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,mm,swift}"
 

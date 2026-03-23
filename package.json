@@ -33,7 +33,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/pyrocancode/react-native-vk-auth-.git"
+    "url": "https://github.com/pyrocancode/react-native-vk-auth.git"
   },
   "author": "Nikita Likhachev <facelessmay@gmail.com> (https://github.com/somersets)",
   "contributors": [
@@ -41,9 +41,9 @@
   ],
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/pyrocancode/react-native-vk-auth-/issues"
+    "url": "https://github.com/pyrocancode/react-native-vk-auth/issues"
   },
-  "homepage": "https://github.com/pyrocancode/react-native-vk-auth-#readme",
+  "homepage": "https://github.com/pyrocancode/react-native-vk-auth#readme",
   "publishConfig": {
     "access": "public"
   },
