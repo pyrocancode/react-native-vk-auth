@@ -1,18 +1,14 @@
 # @pyrocancode/react-native-vk-auth
 
-React Native VK ID Auth.
-
-Форк библиотеки [@devsomersets/react-native-vk-auth](https://www.npmjs.com/package/@devsomersets/react-native-vk-auth) ([исходный репозиторий](https://github.com/somersets/react-native-vk-auth), автор Nikita Likhachev). Разработка ведётся в [pyrocancode/react-native-vk-auth](https://github.com/pyrocancode/react-native-vk-auth).
+Тонкая обёртка над **VK ID SDK** для React Native: **OAuth 2.1**, нативные модули iOS и Android. Репозиторий: [pyrocancode/react-native-vk-auth](https://github.com/pyrocancode/react-native-vk-auth).
 
 ## Installation
-
-Из npm (после публикации пакета):
 
 ```sh
 npm install @pyrocancode/react-native-vk-auth
 ```
 
-Установка напрямую из GitHub:
+Альтернатива — установка из GitHub (конкретная ветка или коммит):
 
 ```sh
 npm install github:pyrocancode/react-native-vk-auth
@@ -88,21 +84,25 @@ cd ios && pod install
 }
 ```
 
-Затем в Typescript необходимо импортировать класс Linking при помощи которого вы сможете подписаться на события открытия ссылок и в месте обработки ссылок вызвать метод openURL у класса VK.
-```javascript
+Подключите `Linking` из React Native и `VK` из этого пакета — в обработчике вызывайте `VK.openURL`, чтобы завершить OAuth-поток после возврата из клиента VK.
+
+```tsx
+import { Linking } from 'react-native';
+import { VK } from '@pyrocancode/react-native-vk-auth';
+
 React.useEffect(() => {
-    Linking.getInitialURL().then((url) => {
-        if (url) {
-            handleOpenURL({'url': url});
-        }
-    }).catch(err => {
-        console.warn('An error occurred', err);
-    });
-        Linking.addEventListener('url', handleOpenURL);
-});
+  Linking.getInitialURL()
+    .then((url) => {
+      if (url) handleOpenURL({ url });
+    })
+    .catch((err) => console.warn('getInitialURL', err));
+
+  const sub = Linking.addEventListener('url', handleOpenURL);
+  return () => sub.remove();
+}, []);
 
 function handleOpenURL(event: { url: string }) {
-    VK.openURL(event.url);
+  VK.openURL(event.url);
 }
 ```
 
@@ -146,148 +146,118 @@ dependencies { }
 <string name="vk_account_manager_id" translatable="false">your.package.account</string>
 ```
 
-## Minimal common setup guide:
-1. Initialization
+## Минимальный общий сценарий (JS)
 
-```javascript
-import { VK, VKID } from 'react-native-superappkit-pub';
+Инициализация выполняется **один раз** при старте приложения. Используйте `VK`, `VKID` и при необходимости `VKOneTapButton` из `@pyrocancode/react-native-vk-auth`.
 
-// must be initialized only once
-let logo = Image.resolveAssetSource(require('./sample_logo.png'));
-let vkid = new VKID(
-    'Superappkit pub',
-    '1.0',
-    logo,
-    {
-        serviceUserAgreement: 'https://help.mail.ru/legal/terms/common/ua',
-        servicePrivacyPolicy: 'https://help.mail.ru/legal/terms/common/privacy',
-        serviceSupport: null,
-    },
-    new SilentTokenExchanger()
+### 1. Инициализация
+
+```tsx
+import { Image } from 'react-native';
+import { VK, VKID } from '@pyrocancode/react-native-vk-auth';
+
+const logo = Image.resolveAssetSource(require('./assets/logo.png'));
+
+const vkid = new VKID(
+  'Моё приложение',
+  '1.0.0',
+  logo,
+  {
+    serviceUserAgreement: 'https://example.com/terms',
+    servicePrivacyPolicy: 'https://example.com/privacy',
+    serviceSupport: null,
+  }
 );
 
 VK.initialize(
-    {
-        credentials: {
-            clientId: 'your-client-id',
-            clientSecret: 'your-client-secret',
-        },
-        mode: VK.Mode.DEBUG,
+  {
+    credentials: {
+      clientId: 'YOUR_CLIENT_ID',
+      clientSecret: 'YOUR_CLIENT_SECRET',
     },
-    vkid
+    mode: VK.Mode.DEBUG,
+  },
+  vkid
 );
 ```
 
-2. Auth
-```javascript
-// App.tsx
+### 2. Подписка на авторизацию и выход
 
-// 1. Silent Token Exchanger
-class SilentTokenExchanger implements VKID.SilentTokenExchanger {
-    exchange(silentData: VKID.SilentToken): Promise<VKID.TokenExchangeResult<VKID.AccessToken, Error>> {
-        return fetch('your_endpoint_for_exchange_token', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json; charset=UTF-8'},
-        })
-        .then((response) => response.json())
-        .then((body) => {
-            let accessToken = 'received access_token';
-            let userId = 'received user_id';
-            let result: VKID.TokenExchangeResult = {
-                ok: true,
-                accessToken: {
-                    token: new VKID.Token(accessToken),
-                    userID: new VKID.UserID(userId),
-                }
-            };
-            return result;
-        });
-    }
-}
+```tsx
+vkid.setOnAuthChanged({
+  onAuthorized(payload) {
+    // OAuth 2.1: access token и идентификатор пользователя VK
+    console.log(payload.accessToken, payload.userId, payload.profile);
+  },
+  onLogout() {
+    console.log('Пользователь вышел');
+  },
+  onAuthFailed(message) {
+    console.warn(message);
+  },
+});
+```
 
-//2. Set observer for auth state changing
-vkid.setOnAuthChanged(new class implements VKID.AuthChangedCallback {
-    onAuth(userSession: VKID.Session.UserSession): void {
-        if (userSession instanceof VKID.Session.Authorized) {
-            // user was successfuly authorized, so show authorized flow or get user profile info
-            userSession.userProfile.then((profileInfo) => {
-                setProfileInfo("Profile info: " + profileInfo.userID.value + " " + profileInfo.firstName);
-            })
-        }
-    }
+### 3. Кнопка One Tap или ручной старт
 
-    onLogout(): void {
-        // logout
-    }
-})
+```tsx
+import { Button } from 'react-native';
+import { VKOneTapButton, VKID } from '@pyrocancode/react-native-vk-auth';
 
-// 2.1 Use One Tap Loggin button
-import { VKOneTapButton } from 'react-native-superappkit-pub';
+// В разметке
 <VKOneTapButton />
 
-// 2.2 OR use start auth manually
-<Button title={'Auth by VK'} onPress={() => auth()} />
-function auth() {
-    vkid.startAuth();
-}
+// Или кнопка «Войти через VK»
+<Button title="Войти через VK" onPress={() => vkid.startAuth()} />
 
-// You may use force close
+// Принудительно закрыть экран авторизации
 function forceCloseAuth() {
-    vkid.closeAuth();
+  vkid.closeAuth();
 }
 
-// Logout
 function logout() {
-    vkid.logout();
+  vkid.logout();
 }
 
-// Check is logged in
-async function isLoggedIn() {
-    let sessions = await vkid.getUserSessions();
-    let isLoggedIn = sessions.some((session) => session instanceof VKID.UserSession.Authorized)
+async function checkLoggedIn() {
+  const sessions = await vkid.userSessions();
+  return sessions.some((s) => s instanceof VKID.Session.Authorized);
 }
 ```
 
-### One Tap Button customization
-```javascript
-import { VKOneTapButton, VKOneTapButtonSpace } from 'react-native-superappkit-pub';
+### Кастомизация One Tap
+
+```tsx
+import { VKOneTapButton, VKOneTapButtonSpace } from '@pyrocancode/react-native-vk-auth';
+
 <VKOneTapButton
-    style={styles.vkView}
-    backgroundStyle={{
-        style: VKOneTapButtonSpace.BgColor.CUSTOM, /* or 'BLUE' (default) or 'WHITE' */
-        customVkIconColor: '#your-color-if-using-custom-style',
-        customBackgroundColor: '#your-color-if-using-custom-style',
-        customTextColor: '#your-color-if-using-custom-style'
-    }}
-    iconGravity={
-        // 'START' (by default) or 'TEXT'
-        VKOneTapButtonSpace.IconGravity.START
-    }
-    firstLineFieldType={
-        // 'NONE' (by default) or 'ACTION' or 'PHONE'
-        VKOneTapButtonSpace.LineFieldType.ACTION
-    }
-    secondLineFieldType={
-        // 'NONE' (by default) or 'ACTION' or 'PHONE'
-        VKOneTapButtonSpace.LineFieldType.PHONE
-    }
-    texts={{
-        noUserText: 'Login as VK',
-        actionText: 'Login as {firstName} {lastName}', /* {firstName} and {lastName} are templates that will be replaced by real user names */
-        phoneText: 'With phone {phone}', /* {phone} is a template that will be replaced by user phone */
-    }}
-    oneLineTextSize={ 16 }
-    firstLineTextSize={ 16 }
-    secondLineTextSize={ 14 }
-    avatarSize={ 64 }
-    iconSize={ 64 }
-    progressSize={ 56 }
+  style={styles.vkView}
+  backgroundStyle={{
+    style: VKOneTapButtonSpace.BgColor.CUSTOM,
+    customVkIconColor: '#fff',
+    customBackgroundColor: '#0077FF',
+    customTextColor: '#fff',
+  }}
+  iconGravity={VKOneTapButtonSpace.IconGravity.START}
+  firstLineFieldType={VKOneTapButtonSpace.LineFieldType.ACTION}
+  secondLineFieldType={VKOneTapButtonSpace.LineFieldType.PHONE}
+  texts={{
+    noUserText: 'Войти через VK',
+    actionText: 'Продолжить как {firstName} {lastName}',
+    phoneText: 'Телефон {phone}',
+  }}
+  oneLineTextSize={16}
+  firstLineTextSize={16}
+  secondLineTextSize={14}
+  avatarSize={64}
+  iconSize={64}
+  progressSize={56}
 />
 ```
 
 ## Usage
 
-Раздел в разработке.
+После настройки iOS/Android (см. выше) используйте API из раздела «Минимальный общий сценарий»: `VK.initialize`, `vkid.setOnAuthChanged`, `vkid.startAuth` / `VKOneTapButton`, `VK.openURL` для deep link.
 
 ## Contributing
 
@@ -295,8 +265,4 @@ See the [contributing guide](CONTRIBUTING.md) to learn how to contribute to the 
 
 ## License
 
-[MIT](LICENSE). Исходный код Nikita Likhachev (2022); изменения и сопровождение форка — pyrocancode (2026). См. полный текст в файле `LICENSE`.
-
----
-
-Made with [create-react-native-library](https://github.com/callstack/react-native-builder-bob)
+[MIT](LICENSE). См. полный текст в файле `LICENSE`.
