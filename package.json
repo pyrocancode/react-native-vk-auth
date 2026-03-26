@@ -28,6 +28,16 @@
   ],
   "keywords": [
     "react-native",
+    "react-native-vk-auth",
+    "vk",
+    "vk-auth",
+    "vk-id",
+    "vkid",
+    "vkontakte",
+    "oauth",
+    "oauth2",
+    "authentication",
+    "login",
     "ios",
     "android"
   ],
@@ -35,7 +45,7 @@
     "type": "git",
     "url": "https://github.com/pyrocancode/react-native-vk-auth.git"
   },
-  "author": "Nikita Likhachev <facelessmay@gmail.com> (https://github.com/somersets)",
+  "author": "Maksim Kulakov <fya-07@list.ru>",
   "contributors": [
     "pyrocancode (https://github.com/pyrocancode)"
   ],
