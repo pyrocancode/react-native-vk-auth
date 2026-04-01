@@ -11,6 +11,23 @@ import com.vk.id.VKIDUser
  */
 internal object VkAuthPayload {
 
+  fun fromAuthorizationCode(
+    code: String,
+    deviceId: String,
+    state: String,
+    codeVerifier: String,
+    isCompletion: Boolean,
+  ): WritableMap {
+    val map = Arguments.createMap()
+    map.putString("type", "authorization_code")
+    map.putString("code", code)
+    map.putString("deviceId", deviceId)
+    map.putString("state", state)
+    map.putString("codeVerifier", codeVerifier)
+    map.putBoolean("isCompletion", isCompletion)
+    return map
+  }
+
   fun fromAccessToken(token: AccessToken): WritableMap {
     val map = Arguments.createMap()
     map.putString("type", "authorized")
