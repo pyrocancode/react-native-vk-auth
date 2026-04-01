@@ -63,9 +63,17 @@ export class VK {
 }
 
 export namespace VK {
+  /**
+   * `authorizationCode` — PKCE на клиенте, в JS придёт `code` + `codeVerifier` + `state` + `deviceId`
+   * (Android: VKIDAuthParams.codeChallenge; iOS: confidential client flow + AuthCodeHandler).
+   * По умолчанию — готовый access token на устройстве.
+   */
+  export type AuthFlowMode = 'accessToken' | 'authorizationCode';
+
   export interface App {
     mode: Mode;
     credentials: Credentials;
+    authFlow?: AuthFlowMode;
   }
 
   export enum Mode {
@@ -88,6 +96,28 @@ function parseOnAuthPayload(
       kind: 'error',
       message: String(raw.error ?? 'VK ID authorization failed'),
     };
+  }
+
+  if (raw.type === 'authorization_code') {
+    if (
+      typeof raw.code === 'string' &&
+      typeof raw.codeVerifier === 'string' &&
+      typeof raw.state === 'string'
+    ) {
+      return {
+        kind: 'ok',
+        payload: {
+          authorizationCode: {
+            code: raw.code,
+            codeVerifier: raw.codeVerifier,
+            state: raw.state,
+            deviceId: typeof raw.deviceId === 'string' ? raw.deviceId : '',
+            isCompletion: Boolean(raw.isCompletion),
+          },
+        },
+      };
+    }
+    return { kind: 'error', message: 'Invalid authorization_code payload' };
   }
 
   if (raw.type === 'authorized') {
@@ -240,11 +270,19 @@ export namespace VKID {
 
   /** Успешная авторизация VK ID (OAuth 2.1): access token и id пользователя VK. */
   export interface AuthSuccessPayload {
-    accessToken: string;
-    userId: string;
+    accessToken?: string;
+    userId?: string;
     profile?: UserProfile;
     /** Android: полный ответ VK ID SDK (отладка). */
     vkidNative?: Record<string, unknown>;
+    /** Поток обмена кода на бэкенде (`authFlow: 'authorizationCode'`). */
+    authorizationCode?: {
+      code: string;
+      codeVerifier: string;
+      state: string;
+      deviceId: string;
+      isCompletion: boolean;
+    };
   }
 
   export interface AuthChangedCallback {

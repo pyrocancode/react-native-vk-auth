@@ -23,18 +23,23 @@ fileprivate func vkAuthTopViewController() -> UIViewController? {
     return top
 }
 
-/// Публичный клиент + PKCE внутри SDK. Для обмена кода на бэкенде позже можно сменить на `confidentialClientFlow`.
-fileprivate func vkAuthMakeConfiguration() -> AuthConfiguration {
-    AuthConfiguration(
-        flow: .publicClientFlow(),
-        scope: Scope([])
-    )
+/// Обмен кода на бэкенде: параметры уходят в JS; `finishFlow` завершает UI SDK (см. `AuthCodeHandler`).
+private final class RnAuthorizationCodeHandler: NSObject, AuthCodeHandler {
+    weak var emitter: VkAuth?
+
+    func exchange(_ code: AuthorizationCode, finishFlow: @escaping () -> Void) {
+        emitter?.sendAuthorizationCodePayload(code)
+        finishFlow()
+    }
 }
 
 /// React Native мост для VK ID SDK. См. https://id.vk.com/about/business/go/docs/ru/vkid/latest/vk-id/connection/migration/ios/migration-ios
 @objc(VkAuth)
 final class VkAuth: RCTEventEmitter {
     fileprivate static weak var _sharedEmitter: VkAuth?
+
+    private let authorizationCodeHandler = RnAuthorizationCodeHandler()
+    private var useAuthorizationCodeFlow = false
 
     @objc(initialize:vkid:)
     func initialize(_ app: NSDictionary, vkid: NSDictionary) {
@@ -47,6 +52,12 @@ final class VkAuth: RCTEventEmitter {
             return
         }
 
+        if let flow = app["authFlow"] as? String, flow == "authorizationCode" {
+            useAuthorizationCodeFlow = true
+        } else {
+            useAuthorizationCodeFlow = false
+        }
+
         do {
             try VKID.shared.set(
                 config: Configuration(
@@ -57,6 +68,7 @@ final class VkAuth: RCTEventEmitter {
                 )
             )
             VkAuth._sharedEmitter = self
+            authorizationCodeHandler.emitter = self
             VKID.shared.add(observer: self)
         } catch {
             os_log("VKID initialization failed: %{public}@", type: .error, error.localizedDescription)
@@ -69,13 +81,41 @@ final class VkAuth: RCTEventEmitter {
         _ = VKID.shared.open(url: url)
     }
 
+    fileprivate func makeAuthConfiguration() -> AuthConfiguration {
+        if useAuthorizationCodeFlow {
+            return AuthConfiguration(
+                flow: .confidentialClientFlow(
+                    codeExchanger: authorizationCodeHandler,
+                    pkce: nil
+                ),
+                scope: Scope([])
+            )
+        }
+        return AuthConfiguration(
+            flow: .publicClientFlow(),
+            scope: Scope([])
+        )
+    }
+
+    fileprivate func sendAuthorizationCodePayload(_ code: AuthorizationCode) {
+        let body: [String: Any] = [
+            "type": "authorization_code",
+            "code": code.code,
+            "deviceId": code.deviceId,
+            "state": code.state,
+            "codeVerifier": code.codeVerifier ?? "",
+            "isCompletion": true,
+        ]
+        sendEvent(withName: "onAuth", body: body)
+    }
+
     @objc func startAuth() {
         guard let presenter = vkAuthTopViewController() else {
             os_log("No presenter for VKID authorize", type: .error)
             return
         }
         VKID.shared.authorize(
-            with: vkAuthMakeConfiguration(),
+            with: makeAuthConfiguration(),
             using: .uiViewController(presenter)
         ) { _ in }
     }
@@ -143,13 +183,16 @@ final class VkAuth: RCTEventEmitter {
 
 extension VkAuth: VKIDObserver {
     func vkid(_ vkid: VKID, didCompleteAuthWith result: AuthResult, in oAuth: OAuthProvider) {
-        do {
-            let session = try result.get()
+        switch result {
+        case .success(let session):
             send(event: .onAuth(userSession: session))
-        } catch AuthError.cancelled {
+        case .failure(AuthError.authCodeExchangedOnYourBackend):
+            // Код уже отправлен в JS из RnAuthorizationCodeHandler.exchange
+            break
+        case .failure(AuthError.cancelled):
             os_log("VKID auth cancelled", type: .info)
-        } catch {
-            os_log("VKID auth failed: %{public}@", type: .error, error.localizedDescription)
+        case .failure(let error):
+            os_log("VKID auth failed: %{public}@", type: .error, String(describing: error))
         }
     }
 
@@ -177,13 +220,17 @@ final class OneTapButtonManager: RCTViewManager {
             return UIView()
         }
 
+        guard let emitter = VkAuth._sharedEmitter else {
+            return UIView()
+        }
+
         let button = OneTapButton(
             layout: .regular(
                 height: .medium(.h44),
                 cornerRadius: 8
             ),
             presenter: .uiViewController(root),
-            authConfiguration: vkAuthMakeConfiguration(),
+            authConfiguration: emitter.makeAuthConfiguration(),
             onCompleteAuth: nil
         )
 

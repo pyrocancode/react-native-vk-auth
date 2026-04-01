@@ -14,12 +14,18 @@ import com.vk.id.auth.VKIDAuthCallback
 import com.vk.id.auth.VKIDAuthParams
 import com.vk.id.logout.VKIDLogoutCallback
 import com.vk.id.logout.VKIDLogoutFail
+import java.util.UUID
 
 class AuthDelegate(private val reactContext: ReactApplicationContext) {
 
   companion object {
     private const val TAG = "VkAuth"
   }
+
+  /** Для потока authorization code: переданы в authorize() и нужны бэкенду вместе с [AuthCodeData]. */
+  private var pendingCodeVerifier: String? = null
+  private var pendingState: String? = null
+  private var authorizationCodeEmitted: Boolean = false
 
   init {
     VKID.logsEnabled = true
@@ -32,6 +38,26 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
       emitAuthFail("No activity")
       return
     }
+
+    authorizationCodeEmitted = false
+    pendingCodeVerifier = null
+    pendingState = null
+
+    val params =
+      if (VkAuthConfig.useAuthorizationCodeFlow) {
+        val verifier = Pkce.generateVerifier()
+        val challenge = Pkce.challengeS256(verifier)
+        val state = UUID.randomUUID().toString()
+        pendingCodeVerifier = verifier
+        pendingState = state
+        VKIDAuthParams.Builder().apply {
+          codeChallenge = challenge
+          this.state = state
+        }.build()
+      } else {
+        VKIDAuthParams.Builder().build()
+      }
+
     VKID.instance.authorize(
       activity,
       object : VKIDAuthCallback {
@@ -44,15 +70,44 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
         }
 
         override fun onAuthCode(data: AuthCodeData, isCompletion: Boolean) {
-          Log.d(TAG, "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}")
+          Log.d(
+            TAG,
+            "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}",
+          )
+          if (!VkAuthConfig.useAuthorizationCodeFlow) {
+            return
+          }
+          if (authorizationCodeEmitted) {
+            return
+          }
+          val verifier = pendingCodeVerifier
+          val state = pendingState
+          if (verifier == null || state == null) {
+            Log.e(TAG, "onAuthCode: missing PKCE state")
+            emitAuthFail("PKCE state lost")
+            return
+          }
+          emitAuthAuthorizationCode(
+            code = data.code,
+            deviceId = data.deviceId,
+            state = state,
+            codeVerifier = verifier,
+            isCompletion = isCompletion,
+          )
+          authorizationCodeEmitted = true
+          pendingCodeVerifier = null
+          pendingState = null
         }
 
         override fun onFail(fail: VKIDAuthFail) {
           Log.e(TAG, "VKID onFail: $fail")
+          pendingCodeVerifier = null
+          pendingState = null
+          authorizationCodeEmitted = false
           emitAuthFail(fail.toString())
         }
       },
-      VKIDAuthParams.Builder().build(),
+      params,
     )
   }
 
@@ -82,7 +137,6 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
   }
 
   fun accessTokenChangedSuccess(token: String, userId: Int) {
-    // Старый поток silent token; оставлено для совместимости с JS до миграции приложения.
     Log.d(TAG, "accessTokenChangedSuccess (legacy): userId=$userId")
   }
 
@@ -108,6 +162,23 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
       return
     }
     promise.resolve(VkAuthPayload.profileForJs(token.userID, token.userData))
+  }
+
+  private fun emitAuthAuthorizationCode(
+    code: String,
+    deviceId: String,
+    state: String,
+    codeVerifier: String,
+    isCompletion: Boolean,
+  ) {
+    val map = VkAuthPayload.fromAuthorizationCode(
+      code = code,
+      deviceId = deviceId,
+      state = state,
+      codeVerifier = codeVerifier,
+      isCompletion = isCompletion,
+    )
+    sendEvent("onAuth", map)
   }
 
   fun emitAuthSuccess(accessToken: com.vk.id.AccessToken) {

@@ -181,6 +181,28 @@ VK.initialize(
 );
 ```
 
+#### Режим `authFlow`
+
+По умолчанию после входа на устройстве доступен **access token** (`payload.accessToken`, `payload.userId`).
+
+Если нужно обменять код на своём бэкенде (PKCE + `code` / `device_id` / `state` / `code_verifier`), передайте при инициализации:
+
+```tsx
+VK.initialize(
+  {
+    credentials: {
+      clientId: 'YOUR_CLIENT_ID',
+      clientSecret: 'YOUR_CLIENT_SECRET',
+    },
+    mode: VK.Mode.DEBUG,
+    authFlow: 'authorizationCode',
+  },
+  vkid
+);
+```
+
+В `onAuthorized` тогда придёт `payload.authorizationCode` с полями `code`, `codeVerifier`, `state`, `deviceId`, `isCompletion` (без `accessToken` в этом потоке). Поддерживается на **iOS и Android**.
+
 ### 2. Подписка на авторизацию и выход
 
 ```tsx
