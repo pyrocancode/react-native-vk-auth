@@ -7,6 +7,7 @@ import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.vk.id.onetap.xml.OneTap
+import com.vkauth.vkid.VkAuthConfig
 import com.vkauth.vkid.VkAuthServiceHolder
 
 /**
@@ -18,13 +19,21 @@ class OneTabButtonManager : SimpleViewManager<OneTap>() {
 
   override fun createViewInstance(context: ThemedReactContext): OneTap {
     val view = OneTap(context)
+    val delegate = VkAuthServiceHolder.authDelegate
+    delegate?.buildAuthorizationCodeUiParams()?.let { view.authParams = it }
     view.setCallbacks(
       onAuth = { _, accessToken ->
-        VkAuthServiceHolder.authDelegate?.emitAuthSuccess(accessToken)
+        delegate?.emitAuthSuccess(accessToken)
       },
       onFail = { _, fail ->
         Log.e(TAG, "OneTap onFail: $fail")
-        VkAuthServiceHolder.authDelegate?.emitAuthFail(fail.toString())
+        delegate?.emitAuthFail(fail.toString())
+        if (VkAuthConfig.useAuthorizationCodeFlow) {
+          delegate?.buildAuthorizationCodeUiParams()?.let { view.authParams = it }
+        }
+      },
+      onAuthCode = { data, isCompletion ->
+        delegate?.dispatchAuthCode(data, isCompletion)
       },
     )
     return view

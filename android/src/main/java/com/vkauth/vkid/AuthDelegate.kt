@@ -12,6 +12,7 @@ import com.vk.id.VKIDAuthFail
 import com.vk.id.auth.AuthCodeData
 import com.vk.id.auth.VKIDAuthCallback
 import com.vk.id.auth.VKIDAuthParams
+import com.vk.id.auth.VKIDAuthUiParams
 import com.vk.id.logout.VKIDLogoutCallback
 import com.vk.id.logout.VKIDLogoutFail
 import java.util.UUID
@@ -70,33 +71,7 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
         }
 
         override fun onAuthCode(data: AuthCodeData, isCompletion: Boolean) {
-          Log.d(
-            TAG,
-            "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}",
-          )
-          if (!VkAuthConfig.useAuthorizationCodeFlow) {
-            return
-          }
-          if (authorizationCodeEmitted) {
-            return
-          }
-          val verifier = pendingCodeVerifier
-          val state = pendingState
-          if (verifier == null || state == null) {
-            Log.e(TAG, "onAuthCode: missing PKCE state")
-            emitAuthFail("PKCE state lost")
-            return
-          }
-          emitAuthAuthorizationCode(
-            code = data.code,
-            deviceId = data.deviceId,
-            state = state,
-            codeVerifier = verifier,
-            isCompletion = isCompletion,
-          )
-          authorizationCodeEmitted = true
-          pendingCodeVerifier = null
-          pendingState = null
+          dispatchAuthCode(data, isCompletion)
         }
 
         override fun onFail(fail: VKIDAuthFail) {
@@ -109,6 +84,60 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
       },
       params,
     )
+  }
+
+  /**
+   * Параметры One Tap / UI при потоке authorization code: PKCE (code_challenge) и state,
+   * как в [startAuth] с [VKIDAuthParams].
+   */
+  fun buildAuthorizationCodeUiParams(): VKIDAuthUiParams? {
+    if (!VkAuthConfig.useAuthorizationCodeFlow) {
+      return null
+    }
+    authorizationCodeEmitted = false
+    pendingCodeVerifier = null
+    pendingState = null
+    val verifier = Pkce.generateVerifier()
+    val challenge = Pkce.challengeS256(verifier)
+    val state = UUID.randomUUID().toString()
+    pendingCodeVerifier = verifier
+    pendingState = state
+    return VKIDAuthUiParams.Builder().apply {
+      codeChallenge = challenge
+      this.state = state
+      scopes = emptySet()
+    }.build()
+  }
+
+  /** Общая обработка [AuthCodeData] для [startAuth] и One Tap. */
+  fun dispatchAuthCode(data: AuthCodeData, isCompletion: Boolean) {
+    Log.d(
+      TAG,
+      "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}",
+    )
+    if (!VkAuthConfig.useAuthorizationCodeFlow) {
+      return
+    }
+    if (authorizationCodeEmitted) {
+      return
+    }
+    val verifier = pendingCodeVerifier
+    val state = pendingState
+    if (verifier == null || state == null) {
+      Log.e(TAG, "onAuthCode: missing PKCE state")
+      emitAuthFail("PKCE state lost")
+      return
+    }
+    emitAuthAuthorizationCode(
+      code = data.code,
+      deviceId = data.deviceId,
+      state = state,
+      codeVerifier = verifier,
+      isCompletion = isCompletion,
+    )
+    authorizationCodeEmitted = true
+    pendingCodeVerifier = null
+    pendingState = null
   }
 
   fun closeAuth() {
@@ -182,6 +211,10 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
   }
 
   fun emitAuthSuccess(accessToken: com.vk.id.AccessToken) {
+    if (VkAuthConfig.useAuthorizationCodeFlow && authorizationCodeEmitted) {
+      Log.d(TAG, "emitAuthSuccess: skipped, authorization code already emitted")
+      return
+    }
     val map = VkAuthPayload.fromAccessToken(accessToken)
     map.putMap("profile", VkAuthPayload.profileForJs(accessToken.userID, accessToken.userData))
     sendEvent("onAuth", map)
