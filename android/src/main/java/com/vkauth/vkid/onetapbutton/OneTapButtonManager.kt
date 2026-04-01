@@ -20,7 +20,7 @@ class OneTabButtonManager : SimpleViewManager<OneTap>() {
   override fun createViewInstance(context: ThemedReactContext): OneTap {
     val view = OneTap(context)
     val delegate = VkAuthServiceHolder.authDelegate
-    delegate?.buildAuthorizationCodeUiParams()?.let { view.authParams = it }
+    delegate?.buildOneTapAuthUiParams()?.let { view.authParams = it }
     view.setCallbacks(
       onAuth = { _, accessToken ->
         delegate?.emitAuthSuccess(accessToken)
@@ -28,9 +28,7 @@ class OneTabButtonManager : SimpleViewManager<OneTap>() {
       onFail = { _, fail ->
         Log.e(TAG, "OneTap onFail: $fail")
         delegate?.emitAuthFail(fail.toString())
-        if (VkAuthConfig.useAuthorizationCodeFlow) {
-          delegate?.buildAuthorizationCodeUiParams()?.let { view.authParams = it }
-        }
+        delegate?.buildOneTapAuthUiParams()?.let { view.authParams = it }
       },
       onAuthCode = { data, isCompletion ->
         delegate?.dispatchAuthCode(data, isCompletion)

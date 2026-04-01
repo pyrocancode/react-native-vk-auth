@@ -11,9 +11,10 @@ class InitDelegate(
 ) {
   fun initialize(app: App, vkid: VKID) {
     VkAuthConfig.useAuthorizationCodeFlow = app.authFlow == AuthFlow.AUTHORIZATION_CODE
+    VkAuthConfig.scopes = app.scopes
     Log.d(
       TAG,
-      "initialize mode=${app.mode} appName=${vkid.appName} authFlow=${app.authFlow}",
+      "initialize mode=${app.mode} appName=${vkid.appName} authFlow=${app.authFlow} scopes=${app.scopes.size}",
     )
   }
 

@@ -74,6 +74,8 @@ export namespace VK {
     mode: Mode;
     credentials: Credentials;
     authFlow?: AuthFlowMode;
+    /** Запрашиваемые доступы, например `phone`, `email` (включите их в кабинете VK ID для приложения). */
+    scopes?: string[];
   }
 
   export enum Mode {

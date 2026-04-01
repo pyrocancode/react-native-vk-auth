@@ -45,19 +45,20 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
     pendingState = null
 
     val params =
-      if (VkAuthConfig.useAuthorizationCodeFlow) {
-        val verifier = Pkce.generateVerifier()
-        val challenge = Pkce.challengeS256(verifier)
-        val state = UUID.randomUUID().toString()
-        pendingCodeVerifier = verifier
-        pendingState = state
-        VKIDAuthParams.Builder().apply {
+      VKIDAuthParams.Builder().apply {
+        if (VkAuthConfig.useAuthorizationCodeFlow) {
+          val verifier = Pkce.generateVerifier()
+          val challenge = Pkce.challengeS256(verifier)
+          val state = UUID.randomUUID().toString()
+          pendingCodeVerifier = verifier
+          pendingState = state
           codeChallenge = challenge
           this.state = state
-        }.build()
-      } else {
-        VKIDAuthParams.Builder().build()
-      }
+        }
+        if (VkAuthConfig.scopes.isNotEmpty()) {
+          scopes = VkAuthConfig.scopes
+        }
+      }.build()
 
     VKID.instance.authorize(
       activity,
@@ -105,7 +106,23 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
     return VKIDAuthUiParams.Builder().apply {
       codeChallenge = challenge
       this.state = state
-      scopes = emptySet()
+      scopes = VkAuthConfig.scopes
+    }.build()
+  }
+
+  /**
+   * [VKIDAuthUiParams] для One Tap: PKCE при authorization code, иначе только [scopes] (как в
+   * [документации One Tap](https://id.vk.com/about/business/go/docs/ru/vkid/latest/vk-id/connection/elements/onetap-button/onetap-android)).
+   */
+  fun buildOneTapAuthUiParams(): VKIDAuthUiParams? {
+    if (VkAuthConfig.useAuthorizationCodeFlow) {
+      return buildAuthorizationCodeUiParams()
+    }
+    if (VkAuthConfig.scopes.isEmpty()) {
+      return null
+    }
+    return VKIDAuthUiParams.Builder().apply {
+      scopes = VkAuthConfig.scopes
     }.build()
   }
 
@@ -116,6 +133,11 @@ class AuthDelegate(private val reactContext: ReactApplicationContext) {
       "VKID onAuthCode: isCompletion=$isCompletion code=${data.code} deviceId=${data.deviceId}",
     )
     if (!VkAuthConfig.useAuthorizationCodeFlow) {
+      return
+    }
+    // SDK может сначала вызвать с isCompletion=false (промежуточный код), затем с true — обмен на бэкенде нужен только по финальному.
+    if (!isCompletion) {
+      Log.d(TAG, "onAuthCode: skip non-final code, wait for isCompletion=true")
       return
     }
     if (authorizationCodeEmitted) {

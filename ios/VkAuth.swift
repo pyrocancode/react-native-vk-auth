@@ -40,6 +40,7 @@ final class VkAuth: RCTEventEmitter {
 
     private let authorizationCodeHandler = RnAuthorizationCodeHandler()
     private var useAuthorizationCodeFlow = false
+    private var requestedScopes: [String] = []
 
     @objc(initialize:vkid:)
     func initialize(_ app: NSDictionary, vkid: NSDictionary) {
@@ -56,6 +57,14 @@ final class VkAuth: RCTEventEmitter {
             useAuthorizationCodeFlow = true
         } else {
             useAuthorizationCodeFlow = false
+        }
+
+        if let scopes = app["scopes"] as? [String] {
+            requestedScopes = scopes
+        } else if let scopes = app["scopes"] as? [Any] {
+            requestedScopes = scopes.compactMap { $0 as? String }
+        } else {
+            requestedScopes = []
         }
 
         do {
@@ -81,6 +90,13 @@ final class VkAuth: RCTEventEmitter {
         _ = VKID.shared.open(url: url)
     }
 
+    fileprivate func makeScope() -> Scope {
+        guard !requestedScopes.isEmpty else {
+            return Scope([])
+        }
+        return Scope(requestedScopes)
+    }
+
     fileprivate func makeAuthConfiguration() -> AuthConfiguration {
         if useAuthorizationCodeFlow {
             return AuthConfiguration(
@@ -88,12 +104,12 @@ final class VkAuth: RCTEventEmitter {
                     codeExchanger: authorizationCodeHandler,
                     pkce: nil
                 ),
-                scope: Scope([])
+                scope: makeScope()
             )
         }
         return AuthConfiguration(
             flow: .publicClientFlow(),
-            scope: Scope([])
+            scope: makeScope()
         )
     }
 
