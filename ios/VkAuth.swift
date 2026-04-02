@@ -91,10 +91,8 @@ final class VkAuth: RCTEventEmitter {
     }
 
     fileprivate func makeScope() -> Scope {
-        guard !requestedScopes.isEmpty else {
-            return Scope([])
-        }
-        return Scope(requestedScopes)
+        // VKID.Scope: есть init(_ Set<String>), нет init([String]) — иначе Xcode: «No exact matches in call to initializer»
+        Scope(Set(requestedScopes))
     }
 
     fileprivate func makeAuthConfiguration() -> AuthConfiguration {
